@@ -1,0 +1,1 @@
+"""Test suite for chimeric contig detector."""

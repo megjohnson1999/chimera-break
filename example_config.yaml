@@ -1,0 +1,36 @@
+# Example configuration for chimeric contig detector
+# All parameters can be overridden via command line
+
+window:
+  size: 1000           # Window size in base pairs
+  step: 100            # Step size for sliding window
+  min_coverage: 10     # Minimum coverage required in window
+  min_reads: 50        # Minimum number of reads in window
+
+quality:
+  min_mapping_quality: 20    # Minimum mapping quality score
+  min_base_quality: 20       # Minimum base quality score
+  max_insert_size: 10000     # Maximum insert size to consider
+  min_insert_size: 0         # Minimum insert size to consider
+  require_proper_pairs: false # Only use properly paired reads
+  end_read_buffer: 300       # Distance from contig end to consider as "end read"
+  lenient_end_reads: true    # Be more lenient with end read pair classification
+
+detection:
+  min_proper_pair_drop: 0.3      # Minimum drop in proper pair rate (30%)
+  insert_size_zscore_threshold: 3.0  # Z-score threshold for insert size anomaly
+  discordant_pair_threshold: 0.2     # Threshold for high discordant pair rate
+  min_confidence_score: 0.7          # Minimum confidence to report breakpoint
+  statistical_method: "robust"       # Options: "robust", "parametric", "nonparametric"
+
+output:
+  format: "json"              # Output format: "json", "tsv", "bed"
+  include_read_evidence: true # Include detailed window metrics
+  verbose: false              # Verbose logging
+  debug: false                # Debug logging
+
+validation:
+  enabled: false              # Enable validation modules
+  taxonomy_db: null           # Path to taxonomy database
+  evaluate_splits: true       # Evaluate quality of potential splits
+  min_split_length: 1000      # Minimum viable split segment length
