@@ -28,37 +28,103 @@ class TaxonomyValidator(ValidationModule):
     def __init__(self, config: ValidationConfig):
         super().__init__(config)
         self.taxonomy_db = None
+        self.assembly_sequences = None
         if config.taxonomy_db:
             self._load_taxonomy_db(config.taxonomy_db)
             
     def _load_taxonomy_db(self, db_path: str) -> None:
         """Load taxonomy database (implementation depends on format)."""
-        # This is a placeholder - actual implementation would depend on
-        # the taxonomy database format (e.g., NCBI taxonomy, custom format)
         self.logger.info(f"Loading taxonomy database from {db_path}")
-        self.taxonomy_db = {}
+        # For now, just mark as loaded - real implementation would load
+        # a database like NCBI taxonomy, Kraken2 database, etc.
+        self.taxonomy_db = {"loaded": True}
         
-    def validate(self, breakpoints: List[Breakpoint], contig_taxonomy: Dict[str, str] = None) -> List[Dict[str, Any]]:
+    def load_assembly(self, assembly_path: str) -> None:
+        """Load assembly sequences for taxonomy analysis."""
+        try:
+            import pysam
+            self.assembly_sequences = pysam.FastaFile(assembly_path)
+            self.logger.info(f"Loaded assembly sequences from {assembly_path}")
+        except ImportError:
+            self.logger.error("pysam required for assembly loading")
+            self.assembly_sequences = None
+        except Exception as e:
+            self.logger.error(f"Failed to load assembly: {e}")
+            self.assembly_sequences = None
+            
+    def _classify_sequence(self, sequence: str) -> str:
+        """Classify a sequence taxonomically (placeholder)."""
+        # Real implementation would use:
+        # - BLAST against NCBI nt database
+        # - Kraken2/Kraken classification
+        # - MMseqs2 taxonomy
+        # - Custom HMM models
+        
+        # For demonstration, simple heuristic based on GC content
+        gc_content = (sequence.count('G') + sequence.count('C')) / len(sequence)
+        
+        if gc_content < 0.35:
+            return "low_gc_virus"  # Many RNA viruses
+        elif gc_content > 0.55:
+            return "high_gc_bacteria"  # Some bacteria
+        else:
+            return "moderate_gc_organism"
+            
+    def validate(self, breakpoints: List[Breakpoint], **kwargs) -> List[Dict[str, Any]]:
         """Validate breakpoints based on taxonomic consistency."""
-        if not self.taxonomy_db:
-            self.logger.warning("No taxonomy database loaded")
-            return []
+        if not self.assembly_sequences:
+            self.logger.warning("No assembly sequences loaded - taxonomy validation disabled")
+            return [{"error": "Assembly sequences required for taxonomy validation"}]
             
         results = []
         
         for bp in breakpoints:
-            # Placeholder validation logic
-            # Real implementation would:
-            # 1. Get taxonomy for regions flanking the breakpoint
-            # 2. Check if they belong to different taxa
-            # 3. Calculate confidence based on taxonomic distance
-            
-            validation = {
-                "breakpoint": f"{bp.contig}:{bp.position}",
-                "taxonomy_consistent": True,  # Placeholder
-                "confidence_adjustment": 0.0,
-                "notes": "Taxonomy validation not implemented"
-            }
+            try:
+                # Extract sequences flanking the breakpoint
+                flank_size = 1000  # 1kb on each side
+                left_start = max(0, bp.position - flank_size)
+                left_end = bp.position
+                right_start = bp.position
+                right_end = bp.position + flank_size
+                
+                # Get sequences
+                left_seq = self.assembly_sequences.fetch(bp.contig, left_start, left_end)
+                right_seq = self.assembly_sequences.fetch(bp.contig, right_start, right_end)
+                
+                if len(left_seq) < 500 or len(right_seq) < 500:
+                    # Not enough sequence for reliable classification
+                    validation = {
+                        "breakpoint": f"{bp.contig}:{bp.position}",
+                        "taxonomy_consistent": None,
+                        "confidence_adjustment": 0.0,
+                        "notes": "Insufficient sequence for taxonomy analysis"
+                    }
+                else:
+                    # Classify both flanking regions
+                    left_taxon = self._classify_sequence(left_seq)
+                    right_taxon = self._classify_sequence(right_seq)
+                    
+                    # Check consistency
+                    consistent = left_taxon == right_taxon
+                    confidence_penalty = 0.0 if consistent else 0.2
+                    
+                    validation = {
+                        "breakpoint": f"{bp.contig}:{bp.position}",
+                        "left_taxonomy": left_taxon,
+                        "right_taxonomy": right_taxon,
+                        "taxonomy_consistent": consistent,
+                        "confidence_adjustment": -confidence_penalty,
+                        "notes": f"Left: {left_taxon}, Right: {right_taxon}"
+                    }
+                    
+            except Exception as e:
+                validation = {
+                    "breakpoint": f"{bp.contig}:{bp.position}",
+                    "taxonomy_consistent": None,
+                    "confidence_adjustment": 0.0,
+                    "notes": f"Taxonomy analysis failed: {e}"
+                }
+                
             results.append(validation)
             
         return results

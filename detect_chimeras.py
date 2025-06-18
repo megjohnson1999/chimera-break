@@ -32,6 +32,10 @@ def parse_arguments():
     parser.add_argument("output", type=str,
                        help="Output file path")
     
+    # Optional assembly input for taxonomy validation
+    parser.add_argument("--assembly", type=str,
+                       help="Assembly FASTA file (required for taxonomy validation)")
+    
     # Optional arguments
     parser.add_argument("-c", "--config", type=str,
                        help="Configuration file (YAML or JSON)")
@@ -185,6 +189,12 @@ def main():
     if config.validation.enabled:
         logger.info("Running validation modules")
         pipeline = ValidationPipeline(config.validation)
+        
+        # Load assembly for taxonomy validation if provided
+        if args.assembly and config.validation.taxonomy_db:
+            for module in pipeline.modules:
+                if hasattr(module, 'load_assembly'):
+                    module.load_assembly(args.assembly)
         
         # Get contig lengths for split evaluation
         contig_lengths = {}

@@ -57,6 +57,10 @@ python detect_chimeras.py input.bam output.json --debug
 # With custom parameters
 python detect_chimeras.py input.bam output.tsv \
   --window-size 2000 --min-confidence 0.8 --output-format tsv
+
+# With taxonomy validation (requires assembly FASTA)
+python detect_chimeras.py input.bam output.json \
+  --assembly contigs.fasta --validate-taxonomy --taxonomy-db dummy
 ```
 
 ## Basic Usage
@@ -172,8 +176,21 @@ contig_001  45320  0.85  0.4  4.2  0.25
 
 The tool includes optional validation modules:
 
-- **Taxonomy Validation**: Checks if breakpoints separate different taxa
-- **Split Evaluation**: Assesses viability of resulting contig segments
+### Taxonomy Validation
+- **Purpose**: Checks if breakpoints separate regions with different taxonomic classifications
+- **Requirements**: Assembly FASTA file (`--assembly contigs.fasta`)
+- **Current Implementation**: Simple GC-content based classification (placeholder)
+- **Future**: Can be extended with BLAST, Kraken2, or MMseqs2 classification
+- **Usage**: 
+  ```bash
+  python detect_chimeras.py input.bam output.json \
+    --assembly contigs.fasta --validate-taxonomy --taxonomy-db dummy
+  ```
+
+### Split Evaluation
+- **Purpose**: Assesses viability of resulting contig segments after splitting
+- **Requirements**: None (uses BAM header for contig lengths)
+- **Function**: Checks if splits would create segments above minimum length threshold
 
 ## Command Line Options
 
