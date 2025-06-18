@@ -17,7 +17,15 @@ A robust tool for detecting chimeric contigs in viral metagenomic co-assemblies 
 
 ## Installation
 
-### From Source
+### Recommended: Using Conda (handles bioinformatics dependencies better)
+```bash
+git clone https://github.com/megjohnson1999/chimera-break.git
+cd chimera-break
+conda env create -f environment.yaml
+conda activate chimera-break
+```
+
+### Alternative: Using pip
 ```bash
 git clone https://github.com/megjohnson1999/chimera-break.git
 cd chimera-break
@@ -25,9 +33,30 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-### Using pip (when published)
+### Dependencies
+- **Python 3.8+**
+- **pysam** (BAM/SAM file handling) - easier via conda
+- **numpy** (numerical computing)
+- **scipy** (statistical functions) 
+- **pyyaml** (configuration files)
+
+Note: `pysam` requires system libraries (htslib, zlib, etc.) that conda handles automatically.
+
+## Quick Start
+
 ```bash
-pip install chimeric-contig-detector
+# Install with conda (recommended)
+git clone https://github.com/megjohnson1999/chimera-break.git
+cd chimera-break
+conda env create -f environment.yaml
+conda activate chimera-break
+
+# Run detection (your BAM must be sorted and indexed)
+python detect_chimeras.py input.bam output.json --debug
+
+# With custom parameters
+python detect_chimeras.py input.bam output.tsv \
+  --window-size 2000 --min-confidence 0.8 --output-format tsv
 ```
 
 ## Basic Usage
