@@ -17,7 +17,7 @@ MAX_ASSEMBLY_FILE_SIZE = 10 * 1024 * 1024 * 1024  # 10GB
 ALLOWED_BAM_EXTENSIONS = {'.bam', '.sam'}
 ALLOWED_CONFIG_EXTENSIONS = {'.yaml', '.yml', '.json'}
 ALLOWED_ASSEMBLY_EXTENSIONS = {'.fasta', '.fa', '.fna', '.fas'}
-ALLOWED_OUTPUT_EXTENSIONS = {'.json', '.tsv', '.bed', '.txt'}
+ALLOWED_OUTPUT_EXTENSIONS = {'.json', '.tsv', '.bed', '.txt', '.out'}
 
 class SecurityError(Exception):
     """Raised when a security violation is detected."""

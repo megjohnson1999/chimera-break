@@ -284,13 +284,13 @@ class TopologyValidator:
         results = {
             "topology_analyses": {
                 contig: {
-                    "likely_circular": analysis.likely_circular,
-                    "confidence": analysis.confidence,
-                    "evidence": analysis.evidence
+                    "likely_circular": bool(analysis.likely_circular),
+                    "confidence": float(analysis.confidence),
+                    "evidence": self._make_json_serializable(analysis.evidence)
                 }
                 for contig, analysis in topology_analyses.items()
             },
-            "adjusted_breakpoints": adjusted_breakpoints,
+            "adjusted_breakpoints": adjusted_breakpoints,  # Will be serialized by ValidationPipeline
             "original_breakpoint_count": len(breakpoints),
             "adjusted_breakpoint_count": len([bp for bp in adjusted_breakpoints if bp.confidence >= self.config.detection.min_confidence_score])
         }
@@ -301,3 +301,20 @@ class TopologyValidator:
             self.logger.info(f"Detected likely circular contigs: {circular_contigs}")
         
         return results
+    
+    def _make_json_serializable(self, obj):
+        """Convert objects to JSON-serializable format."""
+        if isinstance(obj, dict):
+            return {k: self._make_json_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._make_json_serializable(item) for item in obj]
+        elif isinstance(obj, (bool, int, float, str, type(None))):
+            return obj
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.integer, np.floating)):
+            return obj.item()
+        elif hasattr(obj, '__dict__'):
+            return self._make_json_serializable(obj.__dict__)
+        else:
+            return str(obj)
