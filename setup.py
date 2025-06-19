@@ -12,7 +12,7 @@ setup(
     name="chimeric-contig-detector",
     version="1.0.0",
     author="Megan Johnson",
-    author_email="meganjohnson1w@gmail.com",
+    author_email="noreply@example.com",
     description="Detect chimeric contigs in viral metagenomic co-assemblies using read-pair analysis",
     long_description=long_description,
     long_description_content_type="text/markdown",

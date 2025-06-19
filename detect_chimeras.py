@@ -17,6 +17,16 @@ from chimeric_detector.core.bam_parser import BAMParser
 from chimeric_detector.core.window_analysis import WindowAnalyzer, WindowMetrics
 from chimeric_detector.modules.validation import ValidationPipeline
 from chimeric_detector.utils.output import OutputFormatter, Logger
+from chimeric_detector.utils.progress import ProgressTracker, ProgressReporter
+from chimeric_detector.utils.security import (
+    validate_bam_file, validate_config_file, validate_assembly_file,
+    validate_output_path, sanitize_contig_name, validate_numeric_parameter,
+    SecurityError, PathTraversalError, FileSizeError, FileTypeError
+)
+from chimeric_detector.utils.performance import (
+    ParallelProcessor, WorkItem, PerformanceMonitor, performance_context,
+    ResourceManager
+)
 
 
 def parse_arguments():
@@ -88,46 +98,163 @@ def parse_arguments():
                             help="Enable debug output")
     output_group.add_argument("--log-file", type=str,
                             help="Write logs to file")
+    output_group.add_argument("--checkpoint", type=str,
+                            help="Checkpoint file for resumable processing")
+    
+    # Performance options
+    perf_group = parser.add_argument_group("Performance options")
+    perf_group.add_argument("--parallel", action="store_true",
+                          help="Enable parallel processing")
+    perf_group.add_argument("--max-workers", type=int,
+                          help="Maximum number of worker processes")
+    perf_group.add_argument("--memory-limit", type=float,
+                          help="Memory limit in GB")
+    perf_group.add_argument("--profile", action="store_true",
+                          help="Enable performance profiling")
     
     return parser.parse_args()
 
 
-def detect_chimeras_in_contig(bam_parser: BAMParser, analyzer: WindowAnalyzer,
-                            contig: str, config: Config) -> List:
-    """Detect chimeras in a single contig."""
+def detect_chimeras_in_contig_parallel(bam_path: str, contig: str, config_dict: dict) -> List:
+    """Detect chimeras in a single contig - parallel processing version."""
+    from chimeric_detector.config.config import Config
+    from chimeric_detector.core.bam_parser import BAMParser
+    from chimeric_detector.core.window_analysis import WindowAnalyzer
+    
+    # Reconstruct objects from serializable data
+    config = Config.from_dict(config_dict)
+    analyzer = WindowAnalyzer(config.window, config.detection, config.quality)
+    
     logger = logging.getLogger(__name__)
     logger.info(f"Processing contig: {contig}")
     
-    # Estimate insert size distribution
-    insert_stats = bam_parser.estimate_insert_size_distribution(contig)
-    logger.debug(f"Insert size stats for {contig}: {insert_stats}")
+    try:
+        with BAMParser(bam_path, config.quality, use_streaming=True) as bam_parser:
+            return _detect_chimeras_core(bam_parser, analyzer, contig, config)
+    except Exception as e:
+        logger.error(f"Error in parallel processing of {contig}: {e}")
+        return []
+
+
+def detect_chimeras_in_contig(bam_parser: BAMParser, analyzer: WindowAnalyzer,
+                            contig: str, config: Config) -> List:
+    """Detect chimeras in a single contig with comprehensive error handling."""
+    logger = logging.getLogger(__name__)
+    logger.info(f"Processing contig: {contig}")
     
-    # Collect window metrics
-    window_metrics = []
+    return _detect_chimeras_core(bam_parser, analyzer, contig, config)
+
+
+def _detect_chimeras_core(bam_parser: BAMParser, analyzer: WindowAnalyzer,
+                         contig: str, config: Config) -> List:
+    """Core chimera detection logic shared between serial and parallel versions."""
+    logger = logging.getLogger(__name__)
     
-    for start, end, pairs in bam_parser.iterate_windows(
-        contig, config.window.size, config.window.step
-    ):
-        coverage = bam_parser.calculate_coverage_in_window(contig, start, end)
-        metrics = analyzer.calculate_window_metrics(pairs, coverage)
+    try:
+        # Estimate insert size distribution
+        try:
+            insert_stats = bam_parser.estimate_insert_size_distribution(contig)
+            logger.debug(f"Insert size stats for {contig}: {insert_stats}")
+        except Exception as e:
+            logger.error(f"Failed to estimate insert size for {contig}: {e}")
+            # Use default stats to allow processing to continue
+            insert_stats = {"median": 500, "mad": 100, "mean": 500, "std": 100}
         
-        if metrics:
-            metrics.start = start
-            metrics.end = end
-            window_metrics.append(metrics)
-    
-    logger.info(f"Collected metrics for {len(window_metrics)} windows in {contig}")
-    
-    # Detect breakpoints
-    breakpoints = analyzer.detect_breakpoints(window_metrics, contig, insert_stats)
-    logger.info(f"Found {len(breakpoints)} potential breakpoints in {contig}")
-    
-    return breakpoints
+        # Collect window metrics
+        window_metrics = []
+        windows_processed = 0
+        windows_failed = 0
+        
+        try:
+            for start, end, pairs in bam_parser.iterate_windows(
+                contig, config.window.size, config.window.step
+            ):
+                windows_processed += 1
+                try:
+                    coverage = bam_parser.calculate_coverage_in_window(contig, start, end)
+                    metrics = analyzer.calculate_window_metrics(pairs, coverage)
+                    
+                    if metrics:
+                        metrics.start = start
+                        metrics.end = end
+                        window_metrics.append(metrics)
+                        
+                except Exception as e:
+                    windows_failed += 1
+                    logger.debug(f"Failed to process window {start}-{end} in {contig}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Fatal error during window iteration for {contig}: {e}")
+            return []
+        
+        if windows_failed > 0:
+            logger.warning(f"Failed to process {windows_failed}/{windows_processed} windows in {contig}")
+            
+        if not window_metrics:
+            logger.warning(f"No valid window metrics collected for {contig}")
+            return []
+            
+        logger.info(f"Collected metrics for {len(window_metrics)} windows in {contig}")
+        
+        # Detect breakpoints
+        try:
+            breakpoints = analyzer.detect_breakpoints(window_metrics, contig, insert_stats)
+            logger.info(f"Found {len(breakpoints)} potential breakpoints in {contig}")
+            return breakpoints
+            
+        except Exception as e:
+            logger.error(f"Failed to detect breakpoints in {contig}: {e}")
+            return []
+            
+    except Exception as e:
+        logger.error(f"Unexpected error processing contig {contig}: {e}")
+        return []
 
 
 def main():
     """Main entry point."""
     args = parse_arguments()
+    
+    try:
+        # Validate all input paths for security
+        validated_bam = validate_bam_file(args.bam_file)
+        validated_output = validate_output_path(args.output)
+        
+        # Validate optional inputs
+        validated_config = None
+        if args.config:
+            validated_config = validate_config_file(args.config)
+            
+        validated_assembly = None
+        if args.assembly:
+            validated_assembly = validate_assembly_file(args.assembly)
+            
+        # Validate and sanitize contig names if provided
+        validated_contigs = None
+        if args.contigs:
+            validated_contigs = [sanitize_contig_name(contig) for contig in args.contigs]
+            
+        # Validate numeric parameters if provided
+        if args.window_size:
+            validate_numeric_parameter(args.window_size, 100, 100000, "window_size")
+        if args.window_step:
+            validate_numeric_parameter(args.window_step, 10, 10000, "window_step")
+        if args.min_coverage:
+            validate_numeric_parameter(args.min_coverage, 0.1, 1000.0, "min_coverage")
+        if args.min_confidence:
+            validate_numeric_parameter(args.min_confidence, 0.0, 1.0, "min_confidence")
+        if args.max_workers:
+            validate_numeric_parameter(args.max_workers, 1, 32, "max_workers")
+        if args.memory_limit:
+            validate_numeric_parameter(args.memory_limit, 0.5, 1000.0, "memory_limit")
+            
+    except (SecurityError, PathTraversalError, FileSizeError, FileTypeError) as e:
+        print(f"Security error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Input validation error: {e}", file=sys.stderr)
+        sys.exit(1)
     
     # Set up logging
     Logger.setup_logging(
@@ -140,9 +267,9 @@ def main():
     logger.info("Starting chimeric contig detection")
     
     # Load configuration
-    if args.config:
-        config = Config.from_file(Path(args.config))
-        logger.info(f"Loaded configuration from {args.config}")
+    if validated_config:
+        config = Config.from_file(validated_config)
+        logger.info(f"Loaded configuration from {validated_config}")
     else:
         config = Config()
         
@@ -153,30 +280,106 @@ def main():
     analyzer = WindowAnalyzer(config.window, config.detection, config.quality)
     formatter = OutputFormatter(config.output)
     
+    # Set up resource management
+    resource_manager = ResourceManager(args.memory_limit)
+    
     all_breakpoints = []
     
     # Process BAM file
     try:
-        with BAMParser(args.bam_file, config.quality) as bam_parser:
+        with BAMParser(str(validated_bam), config.quality, use_streaming=True) as bam_parser:
             # Get contigs to process
-            if args.contigs:
-                contigs = args.contigs
+            if validated_contigs:
+                contigs = validated_contigs
             else:
                 contigs = bam_parser.get_contigs()
                 
             logger.info(f"Processing {len(contigs)} contigs")
             
-            # Process each contig
-            for contig in contigs:
-                try:
-                    breakpoints = detect_chimeras_in_contig(
-                        bam_parser, analyzer, contig, config
+            # Set up progress tracking
+            checkpoint_file = Path(args.checkpoint) if args.checkpoint else None
+            progress = ProgressTracker(len(contigs), checkpoint_file)
+            
+            # Resume from checkpoint if available
+            remaining_contigs = progress.get_remaining_contigs(contigs)
+            if len(remaining_contigs) < len(contigs):
+                logger.info(f"Resuming from checkpoint: {len(remaining_contigs)} contigs remaining")
+                # Load existing results
+                existing_results = progress.get_results()
+                for contig_results in existing_results.values():
+                    if isinstance(contig_results, list):
+                        all_breakpoints.extend(contig_results)
+            
+            # Choose processing method based on arguments and data size
+            use_parallel = args.parallel and len(remaining_contigs) > 1
+            
+            if use_parallel:
+                logger.info("Using parallel processing")
+                
+                # Set up parallel processor
+                parallel_processor = ParallelProcessor(config, args.max_workers)
+                
+                # Create work items
+                work_items = [
+                    WorkItem(
+                        id=f"contig_{contig}",
+                        contig=contig,
+                        args=(str(validated_bam), contig, config.to_dict())
                     )
-                    all_breakpoints.extend(breakpoints)
-                except Exception as e:
-                    logger.error(f"Error processing contig {contig}: {e}")
-                    if config.output.debug:
-                        raise
+                    for contig in remaining_contigs
+                ]
+                
+                # Process in parallel with performance monitoring
+                with performance_context(f"Parallel processing {len(work_items)} contigs") as monitor:
+                    results = parallel_processor.process_contigs_parallel(
+                        work_items, detect_chimeras_in_contig_parallel, progress
+                    )
+                    
+                    # Collect results
+                    for contig, breakpoints in results.items():
+                        if isinstance(breakpoints, list):
+                            all_breakpoints.extend(breakpoints)
+                            monitor.record_item_processed()
+                        else:
+                            monitor.record_error()
+                            
+            else:
+                logger.info("Using sequential processing")
+                
+                # Process each remaining contig sequentially
+                with performance_context(f"Sequential processing {len(remaining_contigs)} contigs") as monitor:
+                    for contig in remaining_contigs:
+                        progress.start_contig(contig)
+                        
+                        try:
+                            # Check memory usage
+                            if resource_manager.suggest_gc():
+                                import gc
+                                gc.collect()
+                                
+                            breakpoints = detect_chimeras_in_contig(
+                                bam_parser, analyzer, contig, config
+                            )
+                            all_breakpoints.extend(breakpoints)
+                            progress.complete_contig(contig, breakpoints)
+                            monitor.record_item_processed()
+                            
+                        except Exception as e:
+                            error_msg = f"Error processing contig {contig}: {e}"
+                            progress.fail_contig(contig, error_msg)
+                            monitor.record_error()
+                            
+                            if config.output.debug:
+                                raise
+            
+            # Clean up checkpoint on successful completion
+            if progress.is_complete():
+                progress.cleanup_checkpoint()
+                
+            # Log performance summary
+            if args.profile:
+                memory_stats = resource_manager.get_memory_stats()
+                logger.info(f"Final memory usage: {memory_stats['process_rss_gb']:.1f}GB")
                         
     except Exception as e:
         logger.error(f"Error processing BAM file: {e}")
@@ -191,14 +394,14 @@ def main():
         pipeline = ValidationPipeline(config.validation)
         
         # Load assembly for taxonomy validation if provided
-        if args.assembly and config.validation.taxonomy_db:
+        if validated_assembly and config.validation.taxonomy_db:
             for module in pipeline.modules:
                 if hasattr(module, 'load_assembly'):
-                    module.load_assembly(args.assembly)
+                    module.load_assembly(str(validated_assembly))
         
         # Get contig lengths for split evaluation
         contig_lengths = {}
-        with BAMParser(args.bam_file, config.quality) as bam_parser:
+        with BAMParser(str(validated_bam), config.quality) as bam_parser:
             for contig in bam_parser.get_contigs():
                 contig_lengths[contig] = bam_parser._bam.get_reference_length(contig)
                 
@@ -209,7 +412,7 @@ def main():
         
     # Write results
     metadata = {
-        "bam_file": args.bam_file,
+        "bam_file": str(validated_bam),
         "total_contigs": len(contigs),
         "config": config.to_dict()
     }
@@ -217,8 +420,8 @@ def main():
     if validation_results:
         metadata["validation"] = validation_results
         
-    formatter.write_results(all_breakpoints, Path(args.output), metadata)
-    logger.info(f"Results written to {args.output}")
+    formatter.write_results(all_breakpoints, validated_output, metadata)
+    logger.info(f"Results written to {validated_output}")
     
 
 if __name__ == "__main__":

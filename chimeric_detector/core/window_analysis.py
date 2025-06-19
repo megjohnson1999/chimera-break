@@ -53,8 +53,13 @@ class RobustStatistics(StatisticalMethod):
         median_ref = np.median(reference_values)
         mad_ref = np.median(np.abs(reference_values - median_ref))
         
+        # Prevent division by zero with more robust handling
         if mad_ref == 0:
-            mad_ref = 1.0
+            # If all reference values are identical, check if current values differ
+            if np.std(values) == 0:
+                return 0.0  # Both distributions are constant
+            else:
+                return float('inf')  # Current values vary while reference is constant
             
         current_median = np.median(values)
         z_score = (current_median - median_ref) / (1.4826 * mad_ref)
@@ -165,8 +170,8 @@ class WindowAnalyzer:
             insert_size_mad = 0
             
         return WindowMetrics(
-            start=pairs[0].position if pairs else 0,
-            end=pairs[-1].position if pairs else 0,
+            start=pairs[0].position if len(pairs) > 0 else 0,
+            end=pairs[-1].position if len(pairs) > 0 else 0,
             coverage=coverage,
             read_count=len(pairs),
             proper_pair_rate=proper_pair_rate,
@@ -190,6 +195,12 @@ class WindowAnalyzer:
         for window in windows:
             if ref_mad > 0:
                 window.insert_size_zscore = abs(window.insert_size_median - ref_median) / (1.4826 * ref_mad)
+            else:
+                # If reference MAD is 0, all insert sizes are identical
+                if window.insert_size_median != ref_median:
+                    window.insert_size_zscore = float('inf')
+                else:
+                    window.insert_size_zscore = 0.0
         
         # Scan for breakpoints
         for i in range(1, len(windows) - 1):
@@ -266,6 +277,9 @@ class WindowAnalyzer:
         breakpoints.sort(key=lambda x: x.position)
         
         merged = []
+        if len(breakpoints) == 0:
+            return merged
+            
         current = breakpoints[0]
         
         for bp in breakpoints[1:]:

@@ -2,9 +2,12 @@
 
 import json
 import yaml
+import logging
 from dataclasses import dataclass, field, asdict
 from typing import Dict, Any, Optional, List
 from pathlib import Path
+
+from ..utils.security import safe_file_open, SecurityError
 
 
 @dataclass
@@ -67,14 +70,45 @@ class Config:
     
     @classmethod
     def from_file(cls, config_path: Path) -> "Config":
-        """Load configuration from YAML or JSON file."""
-        with open(config_path) as f:
-            if config_path.suffix in ['.yaml', '.yml']:
-                data = yaml.safe_load(f)
-            else:
-                data = json.load(f)
+        """Load configuration from YAML or JSON file with comprehensive error handling."""
+        logger = logging.getLogger(__name__)
         
-        return cls.from_dict(data)
+        try:
+            # Use secure file opening
+            with safe_file_open(config_path, 'r') as f:
+                if config_path.suffix.lower() in ['.yaml', '.yml']:
+                    try:
+                        data = yaml.safe_load(f)
+                    except yaml.YAMLError as e:
+                        raise ValueError(f"Invalid YAML syntax in {config_path}: {e}")
+                elif config_path.suffix.lower() == '.json':
+                    try:
+                        data = json.load(f)
+                    except json.JSONDecodeError as e:
+                        raise ValueError(f"Invalid JSON syntax in {config_path}: {e}")
+                else:
+                    raise ValueError(f"Unsupported config file format: {config_path.suffix}")
+                
+                # Validate that data was loaded
+                if data is None:
+                    logger.warning(f"Config file {config_path} is empty, using defaults")
+                    data = {}
+                elif not isinstance(data, dict):
+                    raise ValueError(f"Config file must contain a dictionary, got {type(data)}")
+                    
+        except SecurityError as e:
+            raise ValueError(f"Security error loading config: {e}")
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Configuration file not found: {config_path}")
+        except PermissionError:
+            raise PermissionError(f"Permission denied reading config file: {config_path}")
+        except Exception as e:
+            raise RuntimeError(f"Unexpected error loading config from {config_path}: {e}")
+        
+        try:
+            return cls.from_dict(data)
+        except Exception as e:
+            raise ValueError(f"Invalid configuration structure in {config_path}: {e}")
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Config":
