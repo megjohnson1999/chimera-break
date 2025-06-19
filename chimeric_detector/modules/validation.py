@@ -5,8 +5,9 @@ from typing import List, Dict, Any, Optional
 import logging
 from pathlib import Path
 
-from ..core.window_analysis import Breakpoint
+from ..core.window_analysis import Breakpoint, WindowMetrics
 from ..config.config import ValidationConfig
+from .topology import TopologyValidator
 
 
 class ValidationModule(ABC):
@@ -191,32 +192,73 @@ class SplitEvaluator(ValidationModule):
         
 
 class ValidationPipeline:
-    """Manages multiple validation modules."""
+    """Manages multiple validation modules including topology analysis."""
     
-    def __init__(self, config: ValidationConfig):
+    def __init__(self, config: ValidationConfig, enable_topology: bool = True):
         self.config = config
+        self.enable_topology = enable_topology
         self.logger = logging.getLogger(__name__)
         self.modules = []
+        self.topology_validator = None
         
         if config.enabled and config.taxonomy_db:
             self.modules.append(TaxonomyValidator(config))
             
         if config.evaluate_splits:
             self.modules.append(SplitEvaluator(config))
-            
-    def run_validation(self, breakpoints: List[Breakpoint], **context) -> Dict[str, List[Dict[str, Any]]]:
-        """Run all validation modules."""
-        results = {}
         
+        # Add topology validator if enabled
+        if enable_topology:
+            from ..config.config import Config
+            # Create a full config object for topology analysis
+            full_config = Config()
+            full_config.validation = config
+            self.topology_validator = TopologyValidator(full_config)
+            
+    def run_validation(self, breakpoints: List[Breakpoint], 
+                      window_metrics_by_contig: Optional[Dict[str, List[WindowMetrics]]] = None,
+                      bam_parser = None, **context) -> Dict[str, Any]:
+        """Run all validation modules including topology analysis."""
+        results = {}
+        adjusted_breakpoints = breakpoints
+        
+        # Run topology validation first (it can adjust breakpoint confidences)
+        if self.topology_validator and window_metrics_by_contig and bam_parser:
+            self.logger.info("Running topology analysis")
+            try:
+                topology_results = self.topology_validator.validate_with_topology(
+                    breakpoints, window_metrics_by_contig, bam_parser
+                )
+                results["TopologyValidator"] = topology_results
+                
+                # Use adjusted breakpoints for other validators
+                adjusted_breakpoints = topology_results.get("adjusted_breakpoints", breakpoints)
+                
+            except Exception as e:
+                self.logger.error(f"Error in topology validation: {e}")
+                results["TopologyValidator"] = {"error": str(e)}
+        
+        # Run traditional validation modules
         for module in self.modules:
             module_name = module.__class__.__name__
             self.logger.info(f"Running {module_name}")
             
             try:
-                module_results = module.validate(breakpoints, **context)
+                module_results = module.validate(adjusted_breakpoints, **context)
                 results[module_name] = module_results
             except Exception as e:
                 self.logger.error(f"Error in {module_name}: {e}")
                 results[module_name] = [{"error": str(e)}]
+        
+        # Add final breakpoint list to results
+        results["final_breakpoints"] = [
+            {
+                "contig": bp.contig,
+                "position": bp.position,
+                "confidence": bp.confidence,
+                "evidence": bp.evidence
+            }
+            for bp in adjusted_breakpoints
+        ]
                 
         return results

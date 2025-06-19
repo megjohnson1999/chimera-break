@@ -10,7 +10,8 @@ import argparse
 import sys
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict
+from collections import defaultdict
 
 from chimeric_detector.config.config import Config
 from chimeric_detector.core.bam_parser import BAMParser
@@ -85,6 +86,10 @@ def parse_arguments():
                                 help="Path to taxonomy database")
     validation_group.add_argument("--evaluate-splits", action="store_true",
                                 help="Evaluate quality of potential splits")
+    validation_group.add_argument("--disable-topology", action="store_true",
+                                help="Disable topology-aware validation (DTR/circular genome detection)")
+    validation_group.add_argument("--topology-threshold", type=float, default=0.6,
+                                help="Confidence threshold for circular genome detection")
     
     # Output options
     output_group = parser.add_argument_group("Output options")
@@ -115,8 +120,12 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def detect_chimeras_in_contig_parallel(bam_path: str, contig: str, config_dict: dict) -> List:
-    """Detect chimeras in a single contig - parallel processing version."""
+def detect_chimeras_in_contig_parallel(bam_path: str, contig: str, config_dict: dict) -> Dict:
+    """Detect chimeras in a single contig - parallel processing version.
+    
+    Returns:
+        Dict with 'breakpoints' and 'window_metrics' keys
+    """
     from chimeric_detector.config.config import Config
     from chimeric_detector.core.bam_parser import BAMParser
     from chimeric_detector.core.window_analysis import WindowAnalyzer
@@ -130,15 +139,23 @@ def detect_chimeras_in_contig_parallel(bam_path: str, contig: str, config_dict: 
     
     try:
         with BAMParser(bam_path, config.quality, use_streaming=True) as bam_parser:
-            return _detect_chimeras_core(bam_parser, analyzer, contig, config)
+            breakpoints, window_metrics = _detect_chimeras_core(bam_parser, analyzer, contig, config)
+            return {
+                'breakpoints': breakpoints,
+                'window_metrics': window_metrics
+            }
     except Exception as e:
         logger.error(f"Error in parallel processing of {contig}: {e}")
-        return []
+        return {'breakpoints': [], 'window_metrics': []}
 
 
 def detect_chimeras_in_contig(bam_parser: BAMParser, analyzer: WindowAnalyzer,
-                            contig: str, config: Config) -> List:
-    """Detect chimeras in a single contig with comprehensive error handling."""
+                            contig: str, config: Config) -> Tuple[List, List]:
+    """Detect chimeras in a single contig with comprehensive error handling.
+    
+    Returns:
+        Tuple of (breakpoints, window_metrics)
+    """
     logger = logging.getLogger(__name__)
     logger.info(f"Processing contig: {contig}")
     
@@ -146,8 +163,12 @@ def detect_chimeras_in_contig(bam_parser: BAMParser, analyzer: WindowAnalyzer,
 
 
 def _detect_chimeras_core(bam_parser: BAMParser, analyzer: WindowAnalyzer,
-                         contig: str, config: Config) -> List:
-    """Core chimera detection logic shared between serial and parallel versions."""
+                         contig: str, config: Config) -> Tuple[List, List]:
+    """Core chimera detection logic shared between serial and parallel versions.
+    
+    Returns:
+        Tuple of (breakpoints, window_metrics)
+    """
     logger = logging.getLogger(__name__)
     
     try:
@@ -186,14 +207,14 @@ def _detect_chimeras_core(bam_parser: BAMParser, analyzer: WindowAnalyzer,
                     
         except Exception as e:
             logger.error(f"Fatal error during window iteration for {contig}: {e}")
-            return []
+            return [], []
         
         if windows_failed > 0:
             logger.warning(f"Failed to process {windows_failed}/{windows_processed} windows in {contig}")
             
         if not window_metrics:
             logger.warning(f"No valid window metrics collected for {contig}")
-            return []
+            return [], []
             
         logger.info(f"Collected metrics for {len(window_metrics)} windows in {contig}")
         
@@ -201,15 +222,15 @@ def _detect_chimeras_core(bam_parser: BAMParser, analyzer: WindowAnalyzer,
         try:
             breakpoints = analyzer.detect_breakpoints(window_metrics, contig, insert_stats)
             logger.info(f"Found {len(breakpoints)} potential breakpoints in {contig}")
-            return breakpoints
+            return breakpoints, window_metrics
             
         except Exception as e:
             logger.error(f"Failed to detect breakpoints in {contig}: {e}")
-            return []
+            return [], window_metrics  # Still return window metrics even if breakpoint detection fails
             
     except Exception as e:
         logger.error(f"Unexpected error processing contig {contig}: {e}")
-        return []
+        return [], []
 
 
 def main():
@@ -284,6 +305,7 @@ def main():
     resource_manager = ResourceManager(args.memory_limit)
     
     all_breakpoints = []
+    all_window_metrics = defaultdict(list)  # Store window metrics by contig
     
     # Process BAM file
     try:
@@ -336,9 +358,13 @@ def main():
                     )
                     
                     # Collect results
-                    for contig, breakpoints in results.items():
-                        if isinstance(breakpoints, list):
-                            all_breakpoints.extend(breakpoints)
+                    for contig, result in results.items():
+                        if isinstance(result, dict) and 'breakpoints' in result:
+                            all_breakpoints.extend(result['breakpoints'])
+                            all_window_metrics[contig] = result['window_metrics']
+                            monitor.record_item_processed()
+                        elif isinstance(result, list):  # Legacy format
+                            all_breakpoints.extend(result)
                             monitor.record_item_processed()
                         else:
                             monitor.record_error()
@@ -357,10 +383,11 @@ def main():
                                 import gc
                                 gc.collect()
                                 
-                            breakpoints = detect_chimeras_in_contig(
+                            breakpoints, window_metrics = detect_chimeras_in_contig(
                                 bam_parser, analyzer, contig, config
                             )
                             all_breakpoints.extend(breakpoints)
+                            all_window_metrics[contig] = window_metrics
                             progress.complete_contig(contig, breakpoints)
                             monitor.record_item_processed()
                             
@@ -391,7 +418,10 @@ def main():
     validation_results = None
     if config.validation.enabled:
         logger.info("Running validation modules")
-        pipeline = ValidationPipeline(config.validation)
+        
+        # Check if topology validation is enabled
+        enable_topology = not args.disable_topology
+        pipeline = ValidationPipeline(config.validation, enable_topology=enable_topology)
         
         # Load assembly for taxonomy validation if provided
         if validated_assembly and config.validation.taxonomy_db:
@@ -401,14 +431,16 @@ def main():
         
         # Get contig lengths for split evaluation
         contig_lengths = {}
-        with BAMParser(str(validated_bam), config.quality) as bam_parser:
-            for contig in bam_parser.get_contigs():
-                contig_lengths[contig] = bam_parser._bam.get_reference_length(contig)
+        with BAMParser(str(validated_bam), config.quality) as validation_bam_parser:
+            for contig in validation_bam_parser.get_contigs():
+                contig_lengths[contig] = validation_bam_parser._bam.get_reference_length(contig)
                 
-        validation_results = pipeline.run_validation(
-            all_breakpoints,
-            contig_lengths=contig_lengths
-        )
+            validation_results = pipeline.run_validation(
+                all_breakpoints,
+                window_metrics_by_contig=dict(all_window_metrics) if enable_topology else None,
+                bam_parser=validation_bam_parser if enable_topology else None,
+                contig_lengths=contig_lengths
+            )
         
     # Write results
     metadata = {
