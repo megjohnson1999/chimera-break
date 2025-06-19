@@ -195,10 +195,13 @@ def main():
         high_conf_count = summary['high_confidence_breakpoints']
         if high_conf_count > 0:
             print(f"\n🎯 Recommended: Focus on {high_conf_count} high-confidence breakpoints")
-            print(f"   Check: {validated_output}/investigation_report.html")
+            print(f"   🌐 Interactive Browser: {validated_output}/breakpoint_browser.html")
+            print(f"   📋 Summary Report: {validated_output}/investigation_summary.json")
         else:
             print(f"\n💡 No high-confidence breakpoints found")
             print(f"   Consider lowering --min-confidence threshold")
+        
+        print(f"\n🔍 Open the interactive browser in your web browser to explore results!")
         
         logger.info("Investigation completed successfully")
         

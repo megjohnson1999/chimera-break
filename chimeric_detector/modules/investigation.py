@@ -426,64 +426,404 @@ class BreakpointInvestigator:
     
     def _generate_html_report(self, investigations: List[BreakpointEvidence],
                             output_dir: Path, summary_stats: Dict[str, Any]) -> None:
-        """Generate HTML report with visualizations."""
+        """Generate interactive HTML breakpoint browser."""
         
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Breakpoint Investigation Report</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 40px; }}
-                .summary {{ background-color: #f0f0f0; padding: 20px; border-radius: 5px; }}
-                .breakpoint {{ border: 1px solid #ccc; margin: 20px 0; padding: 15px; border-radius: 5px; }}
-                .high-confidence {{ border-color: #ff6b6b; background-color: #ffe0e0; }}
-                .medium-confidence {{ border-color: #ffa500; background-color: #fff5e0; }}
-                .low-confidence {{ border-color: #cccccc; }}
-                table {{ border-collapse: collapse; width: 100%; }}
-                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                th {{ background-color: #f2f2f2; }}
-            </style>
-        </head>
-        <body>
-            <h1>Breakpoint Investigation Report</h1>
-            
-            <div class="summary">
-                <h2>Summary</h2>
-                <p><strong>Total Breakpoints:</strong> {summary_stats['total_breakpoints']}</p>
-                <p><strong>High Confidence:</strong> {summary_stats['high_confidence_breakpoints']}</p>
-                <p><strong>Contigs Affected:</strong> {len(summary_stats['contigs_affected'])}</p>
-            </div>
-        """
+        # Prepare data for JavaScript
+        breakpoint_data = []
+        contig_data = defaultdict(lambda: {"breakpoints": [], "total_length": 0, "is_circular": False})
         
         for inv in investigations:
             bp = inv.breakpoint
-            confidence_class = (
-                "high-confidence" if inv.junction_confidence > 0.8 
-                else "medium-confidence" if inv.junction_confidence > 0.6 
-                else "low-confidence"
-            )
             
-            html_content += f"""
-            <div class="breakpoint {confidence_class}">
-                <h3>{bp.contig}:{bp.position}</h3>
-                <p><strong>Original Confidence:</strong> {bp.confidence:.3f}</p>
-                <p><strong>Junction Confidence:</strong> {inv.junction_confidence:.3f}</p>
-                <p><strong>Discordant Pairs:</strong> {len(inv.discordant_pairs)}</p>
-                <p><strong>Split Reads:</strong> {len(inv.split_reads)}</p>
-            </div>
-            """
+            # Extract topology information if available
+            is_circular = False
+            topology_confidence = 0.0
+            if bp.evidence and "topology_analysis" in bp.evidence:
+                is_circular = bp.evidence["topology_analysis"]
+            if bp.evidence and "topology_adjustment" in bp.evidence:
+                topology_confidence = abs(bp.evidence.get("topology_adjustment", 0))
+            
+            bp_data = {
+                "contig": bp.contig,
+                "position": bp.position,
+                "confidence": bp.confidence,
+                "junction_confidence": inv.junction_confidence,
+                "discordant_pairs": len(inv.discordant_pairs),
+                "split_reads": len(inv.split_reads),
+                "is_circular": is_circular,
+                "topology_confidence": topology_confidence,
+                "evidence_summary": self._summarize_evidence(inv)
+            }
+            breakpoint_data.append(bp_data)
+            
+            # Update contig data
+            contig_data[bp.contig]["breakpoints"].append({
+                "position": bp.position,
+                "confidence": bp.confidence,
+                "junction_confidence": inv.junction_confidence
+            })
+            contig_data[bp.contig]["is_circular"] = is_circular
         
-        html_content += """
-        </body>
-        </html>
+        # Estimate contig lengths from breakpoint positions
+        for contig, data in contig_data.items():
+            if data["breakpoints"]:
+                positions = [bp["position"] for bp in data["breakpoints"]]
+                data["total_length"] = max(positions) + 10000  # Add buffer
+        
+        # Count circular contigs
+        circular_contigs = [c for c, data in contig_data.items() if data["is_circular"]]
+        
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chimera Breakpoint Browser</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }}
+        .header h1 {{
+            margin: 0 0 10px 0;
+            font-size: 2.5em;
+        }}
+        .header .subtitle {{
+            opacity: 0.9;
+            font-size: 1.1em;
+        }}
+        .controls {{
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }}
+        .control-group {{
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }}
+        .control-group label {{
+            font-weight: bold;
+            color: #555;
+            font-size: 0.9em;
+        }}
+        select, input[type="range"] {{
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }}
+        .summary-cards {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }}
+        .summary-card {{
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .summary-card .number {{
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }}
+        .summary-card .label {{
+            color: #666;
+            margin-top: 5px;
+        }}
+        .plot-container {{
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }}
+        .details-panel {{
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            min-height: 200px;
+        }}
+        .details-panel h3 {{
+            margin-top: 0;
+            color: #333;
+        }}
+        .evidence-item {{
+            background: #f8f9fa;
+            padding: 10px;
+            margin: 10px 0;
+            border-left: 4px solid #667eea;
+            border-radius: 4px;
+        }}
+        .circular-badge {{
+            background: #ff6b6b;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            margin-left: 10px;
+        }}
+        .confidence-high {{ color: #28a745; }}
+        .confidence-medium {{ color: #ffc107; }}
+        .confidence-low {{ color: #dc3545; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🧬 Chimera Breakpoint Browser</h1>
+        <div class="subtitle">Interactive analysis of chimeric contig breakpoints</div>
+    </div>
+    
+    <div class="summary-cards">
+        <div class="summary-card">
+            <div class="number">{len(breakpoint_data)}</div>
+            <div class="label">Total Breakpoints</div>
+        </div>
+        <div class="summary-card">
+            <div class="number">{summary_stats['high_confidence_breakpoints']}</div>
+            <div class="label">High Confidence</div>
+        </div>
+        <div class="summary-card">
+            <div class="number">{len(summary_stats['contigs_affected'])}</div>
+            <div class="label">Contigs Affected</div>
+        </div>
+        <div class="summary-card">
+            <div class="number">{len(circular_contigs)}</div>
+            <div class="label">Circular Contigs</div>
+        </div>
+    </div>
+    
+    <div class="controls">
+        <div class="control-group">
+            <label for="confidenceSlider">Minimum Confidence:</label>
+            <input type="range" id="confidenceSlider" min="0" max="1" step="0.1" value="0.5">
+            <span id="confidenceValue">0.5</span>
+        </div>
+        <div class="control-group">
+            <label for="contigSelect">Filter by Contig:</label>
+            <select id="contigSelect">
+                <option value="">All Contigs</option>
+                {chr(10).join([f'<option value="{contig}">{contig}{"" if not data["is_circular"] else " (Circular)"}</option>' for contig, data in contig_data.items()])}
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="topologyFilter">Topology:</label>
+            <select id="topologyFilter">
+                <option value="">All</option>
+                <option value="circular">Circular Only</option>
+                <option value="linear">Linear Only</option>
+            </select>
+        </div>
+    </div>
+    
+    <div class="plot-container">
+        <div id="contigPlot" style="width:100%; height:600px;"></div>
+    </div>
+    
+    <div class="details-panel">
+        <h3>Breakpoint Details</h3>
+        <div id="breakpointDetails">
+            <p>Click on a breakpoint above to see detailed information.</p>
+        </div>
+    </div>
+
+    <script>
+        // Data from Python
+        const breakpoints = {json.dumps(breakpoint_data, indent=8)};
+        const contigs = {json.dumps(dict(contig_data), indent=8)};
+        
+        let filteredBreakpoints = [...breakpoints];
+        
+        // Create initial plot
+        function createContigPlot() {{
+            const traces = [];
+            const contigNames = Object.keys(contigs);
+            
+            contigNames.forEach((contig, idx) => {{
+                const contigBreakpoints = filteredBreakpoints.filter(bp => bp.contig === contig);
+                const isCircular = contigs[contig].is_circular;
+                
+                if (contigBreakpoints.length === 0) return;
+                
+                const x = contigBreakpoints.map(bp => bp.position);
+                const y = Array(contigBreakpoints.length).fill(idx);
+                const colors = contigBreakpoints.map(bp => {{
+                    if (bp.junction_confidence > 0.8) return '#28a745';
+                    if (bp.junction_confidence > 0.6) return '#ffc107';
+                    return '#dc3545';
+                }});
+                const sizes = contigBreakpoints.map(bp => Math.max(8, bp.junction_confidence * 15));
+                
+                const hovertext = contigBreakpoints.map(bp => 
+                    `${{bp.contig}}:${{bp.position}}<br>` +
+                    `Confidence: ${{bp.junction_confidence.toFixed(3)}}<br>` +
+                    `Discordant pairs: ${{bp.discordant_pairs}}<br>` +
+                    `Split reads: ${{bp.split_reads}}<br>` +
+                    `Topology: ${{bp.is_circular ? 'Circular' : 'Linear'}}`
+                );
+                
+                traces.push({{
+                    x: x,
+                    y: y,
+                    mode: 'markers',
+                    type: 'scatter',
+                    name: contig + (isCircular ? ' (Circular)' : ''),
+                    marker: {{
+                        color: colors,
+                        size: sizes,
+                        symbol: isCircular ? 'circle' : 'diamond',
+                        line: {{
+                            width: isCircular ? 2 : 1,
+                            color: isCircular ? '#ff6b6b' : '#666'
+                        }}
+                    }},
+                    text: hovertext,
+                    hovertemplate: '%{{text}}<extra></extra>',
+                    customdata: contigBreakpoints
+                }});
+            }});
+            
+            const layout = {{
+                title: 'Breakpoint Distribution Across Contigs',
+                xaxis: {{
+                    title: 'Position (bp)',
+                    showgrid: true,
+                    gridcolor: '#f0f0f0'
+                }},
+                yaxis: {{
+                    title: 'Contigs',
+                    tickvals: contigNames.map((_, idx) => idx),
+                    ticktext: contigNames.map(name => contigs[name].is_circular ? name + ' ●' : name),
+                    showgrid: true,
+                    gridcolor: '#f0f0f0'
+                }},
+                plot_bgcolor: 'white',
+                paper_bgcolor: 'white',
+                hovermode: 'closest',
+                showlegend: false,
+                margin: {{ l: 100, r: 50, t: 50, b: 50 }}
+            }};
+            
+            const config = {{
+                responsive: true,
+                displayModeBar: true,
+                modeBarButtonsToRemove: ['select2d', 'lasso2d']
+            }};
+            
+            Plotly.newPlot('contigPlot', traces, layout, config);
+            
+            // Add click handler
+            document.getElementById('contigPlot').on('plotly_click', function(data) {{
+                const point = data.points[0];
+                if (point.customdata) {{
+                    showBreakpointDetails(point.customdata[point.pointIndex]);
+                }}
+            }});
+        }}
+        
+        function updateFilters() {{
+            const minConfidence = parseFloat(document.getElementById('confidenceSlider').value);
+            const selectedContig = document.getElementById('contigSelect').value;
+            const topologyFilter = document.getElementById('topologyFilter').value;
+            
+            filteredBreakpoints = breakpoints.filter(bp => {{
+                if (bp.junction_confidence < minConfidence) return false;
+                if (selectedContig && bp.contig !== selectedContig) return false;
+                if (topologyFilter === 'circular' && !bp.is_circular) return false;
+                if (topologyFilter === 'linear' && bp.is_circular) return false;
+                return true;
+            }});
+            
+            createContigPlot();
+        }}
+        
+        function showBreakpointDetails(breakpoint) {{
+            const details = document.getElementById('breakpointDetails');
+            const confidenceClass = breakpoint.junction_confidence > 0.8 ? 'confidence-high' : 
+                                  breakpoint.junction_confidence > 0.6 ? 'confidence-medium' : 'confidence-low';
+            
+            details.innerHTML = `
+                <h4>${{breakpoint.contig}}:${{breakpoint.position}} ${{breakpoint.is_circular ? '<span class="circular-badge">Circular</span>' : ''}}</h4>
+                <div class="evidence-item">
+                    <strong>Confidence:</strong> 
+                    <span class="${{confidenceClass}}">${{breakpoint.junction_confidence.toFixed(3)}}</span>
+                    ${{breakpoint.confidence !== breakpoint.junction_confidence ? 
+                        ` (original: ${{breakpoint.confidence.toFixed(3)}})` : ''}}
+                </div>
+                <div class="evidence-item">
+                    <strong>Evidence:</strong><br>
+                    • Discordant read pairs: ${{breakpoint.discordant_pairs}}<br>
+                    • Split reads: ${{breakpoint.split_reads}}<br>
+                    • Topology analysis: ${{breakpoint.is_circular ? 'Likely circular genome' : 'Linear structure'}}
+                    ${{breakpoint.topology_confidence > 0 ? 
+                        `<br>• Confidence penalty: -${{breakpoint.topology_confidence.toFixed(2)}}` : ''}}
+                </div>
+                <div class="evidence-item">
+                    <strong>Summary:</strong> ${{breakpoint.evidence_summary}}
+                </div>
+            `;
+        }}
+        
+        // Event listeners
+        document.getElementById('confidenceSlider').addEventListener('input', function() {{
+            document.getElementById('confidenceValue').textContent = this.value;
+            updateFilters();
+        }});
+        
+        document.getElementById('contigSelect').addEventListener('change', updateFilters);
+        document.getElementById('topologyFilter').addEventListener('change', updateFilters);
+        
+        // Initialize
+        createContigPlot();
+    </script>
+</body>
+</html>
         """
         
-        html_file = output_dir / "investigation_report.html"
+        html_file = output_dir / "breakpoint_browser.html"
         with open(html_file, 'w') as f:
             f.write(html_content)
         
-        self.logger.info(f"HTML report generated: {html_file}")
+        self.logger.info(f"Interactive breakpoint browser generated: {html_file}")
+    
+    def _summarize_evidence(self, evidence: BreakpointEvidence) -> str:
+        """Create a brief evidence summary for display."""
+        summary_parts = []
+        
+        if evidence.discordant_pairs:
+            summary_parts.append(f"{len(evidence.discordant_pairs)} discordant pairs")
+        
+        if evidence.split_reads:
+            summary_parts.append(f"{len(evidence.split_reads)} split reads")
+        
+        if evidence.breakpoint.evidence.get("topology_analysis"):
+            summary_parts.append("circular genome detected")
+        
+        if evidence.coverage_profile and evidence.coverage_profile.get("profile"):
+            summary_parts.append("coverage anomaly")
+        
+        return "; ".join(summary_parts) if summary_parts else "limited evidence"
 
 
 # Command-line interface for standalone investigation
