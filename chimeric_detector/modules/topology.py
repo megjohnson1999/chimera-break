@@ -61,18 +61,28 @@ class CircularGenomeDetector:
         
         # 4. Overall assessment
         overall_score = np.mean(circular_indicators)
-        likely_circular = overall_score > 0.6  # Threshold for circular detection
+        likely_circular = overall_score > 0.5  # Lower threshold for better detection
         
         # 5. Calculate breakpoint confidence adjustments
         adjustments = {}
         if likely_circular:
-            # Penalize all breakpoints if genome appears circular
-            penalty = min(0.8, overall_score)  # Cap penalty at 0.8
+            # Apply strong penalty for likely circular genomes
+            penalty = min(0.9, overall_score + 0.2)  # Stronger penalty
+            for bp in breakpoints:
+                adjustments[bp.position] = -penalty
+        elif overall_score > 0.3:  # Partial circular evidence
+            # Apply moderate penalty for ambiguous cases
+            penalty = overall_score * 0.5
             for bp in breakpoints:
                 adjustments[bp.position] = -penalty
                 
         evidence["overall_score"] = overall_score
         evidence["circular_indicators"] = circular_indicators
+        
+        # Debug logging
+        self.logger.info(f"Topology analysis for {contig}: score={overall_score:.3f}, "
+                        f"circular={likely_circular}, indicators={[f'{x:.3f}' for x in circular_indicators]}, "
+                        f"breakpoints_before={len(breakpoints)}, penalties={len(adjustments)}")
         
         return TopologyAnalysis(
             contig=contig,
