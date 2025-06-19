@@ -1,0 +1,345 @@
+{
+  "metadata": {
+    "bam_file": "/scratch/sahlab/Megan/coassembly-comparison/enhanced_validation_strategy1_flye_filtered_50kb/merged_mapped.bam",
+    "total_contigs": 25,
+    "config": {
+      "window": {
+        "size": 2000,
+        "step": 500,
+        "min_coverage": 10,
+        "min_reads": 50
+      },
+      "quality": {
+        "min_mapping_quality": 20,
+        "min_base_quality": 20,
+        "max_insert_size": 10000,
+        "min_insert_size": 0,
+        "require_proper_pairs": false,
+        "end_read_buffer": 300,
+        "lenient_end_reads": true
+      },
+      "detection": {
+        "min_proper_pair_drop": 0.3,
+        "insert_size_zscore_threshold": 3.0,
+        "discordant_pair_threshold": 0.2,
+        "min_confidence_score": 0.7,
+        "statistical_method": "robust"
+      },
+      "output": {
+        "format": "json",
+        "include_read_evidence": false,
+        "verbose": true,
+        "debug": false
+      },
+      "validation": {
+        "enabled": true,
+        "taxonomy_db": null,
+        "evaluate_splits": false,
+        "min_split_length": 1000
+      }
+    }
+  },
+  "timestamp": "2025-06-19T11:27:20.407700",
+  "breakpoints": [
+    {
+      "contig": "contig_19",
+      "position": 8000,
+      "confidence": 0.972,
+      "evidence": {
+        "proper_pair_drop": 0.0699,
+        "insert_size_zscore": 0.6745,
+        "discordant_rate": 0.3888
+      }
+    },
+    {
+      "contig": "contig_19",
+      "position": 20000,
+      "confidence": 0.7891,
+      "evidence": {
+        "proper_pair_drop": 0.0062,
+        "insert_size_zscore": 0.5621,
+        "discordant_rate": 0.3156
+      }
+    },
+    {
+      "contig": "contig_12",
+      "position": 13000,
+      "confidence": 0.7824,
+      "evidence": {
+        "proper_pair_drop": 0.1177,
+        "insert_size_zscore": 0.8814,
+        "discordant_rate": 0.313
+      }
+    },
+    {
+      "contig": "contig_23",
+      "position": 1500,
+      "confidence": 0.7439,
+      "evidence": {
+        "proper_pair_drop": -0.0133,
+        "insert_size_zscore": 1.6056,
+        "discordant_rate": 0.2976
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 2000,
+      "confidence": 0.73,
+      "evidence": {
+        "proper_pair_drop": -0.0002,
+        "insert_size_zscore": 3.6502,
+        "discordant_rate": 0.0103
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 13000,
+      "confidence": 0.8094,
+      "evidence": {
+        "proper_pair_drop": -0.0015,
+        "insert_size_zscore": 4.0469,
+        "discordant_rate": 0.0007
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 14000,
+      "confidence": 0.8094,
+      "evidence": {
+        "proper_pair_drop": -0.0,
+        "insert_size_zscore": 4.0469,
+        "discordant_rate": 0.0005
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 18500,
+      "confidence": 0.7221,
+      "evidence": {
+        "proper_pair_drop": 0.0084,
+        "insert_size_zscore": 3.6105,
+        "discordant_rate": 0.0842
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 22500,
+      "confidence": 0.8015,
+      "evidence": {
+        "proper_pair_drop": -0.0463,
+        "insert_size_zscore": 4.0073,
+        "discordant_rate": 0.0059
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 23500,
+      "confidence": 0.8015,
+      "evidence": {
+        "proper_pair_drop": 0.0,
+        "insert_size_zscore": 4.0073,
+        "discordant_rate": 0.0003
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 29000,
+      "confidence": 0.7935,
+      "evidence": {
+        "proper_pair_drop": -0.0497,
+        "insert_size_zscore": 3.9676,
+        "discordant_rate": 0.0012
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 30000,
+      "confidence": 0.7935,
+      "evidence": {
+        "proper_pair_drop": 0.0015,
+        "insert_size_zscore": 3.9676,
+        "discordant_rate": 0.0029
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 46000,
+      "confidence": 0.7062,
+      "evidence": {
+        "proper_pair_drop": 0.0006,
+        "insert_size_zscore": 3.5312,
+        "discordant_rate": 0.0029
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 52500,
+      "confidence": 0.7935,
+      "evidence": {
+        "proper_pair_drop": 0.0003,
+        "insert_size_zscore": 3.9676,
+        "discordant_rate": 0.0026
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 56500,
+      "confidence": 0.8094,
+      "evidence": {
+        "proper_pair_drop": 0.0001,
+        "insert_size_zscore": 4.0469,
+        "discordant_rate": 0.0092
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 67000,
+      "confidence": 0.8094,
+      "evidence": {
+        "proper_pair_drop": -0.0061,
+        "insert_size_zscore": 4.0469,
+        "discordant_rate": 0.0006
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 68000,
+      "confidence": 0.8094,
+      "evidence": {
+        "proper_pair_drop": 0.0048,
+        "insert_size_zscore": 4.0469,
+        "discordant_rate": 0.0055
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 70000,
+      "confidence": 0.7062,
+      "evidence": {
+        "proper_pair_drop": -0.0037,
+        "insert_size_zscore": 3.5312,
+        "discordant_rate": 0.0069
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 76000,
+      "confidence": 0.73,
+      "evidence": {
+        "proper_pair_drop": -0.017,
+        "insert_size_zscore": 3.6502,
+        "discordant_rate": 0.0043
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 82500,
+      "confidence": 0.8332,
+      "evidence": {
+        "proper_pair_drop": -0.0011,
+        "insert_size_zscore": 4.166,
+        "discordant_rate": 0.0629
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 83500,
+      "confidence": 0.9364,
+      "evidence": {
+        "proper_pair_drop": -0.0312,
+        "insert_size_zscore": 4.6818,
+        "discordant_rate": 0.0358
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 85000,
+      "confidence": 0.7538,
+      "evidence": {
+        "proper_pair_drop": -0.0554,
+        "insert_size_zscore": 3.7692,
+        "discordant_rate": 0.0036
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 86000,
+      "confidence": 0.707,
+      "evidence": {
+        "proper_pair_drop": 0.0125,
+        "insert_size_zscore": 0.8332,
+        "discordant_rate": 0.2828
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 87500,
+      "confidence": 0.7538,
+      "evidence": {
+        "proper_pair_drop": -0.2196,
+        "insert_size_zscore": 3.7692,
+        "discordant_rate": 0.0317
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 92500,
+      "confidence": 0.8015,
+      "evidence": {
+        "proper_pair_drop": -0.0099,
+        "insert_size_zscore": 4.0073,
+        "discordant_rate": 0.0251
+      }
+    },
+    {
+      "contig": "contig_2",
+      "position": 93500,
+      "confidence": 0.8015,
+      "evidence": {
+        "proper_pair_drop": -0.0029,
+        "insert_size_zscore": 4.0073,
+        "discordant_rate": 0.0439
+      }
+    },
+    {
+      "contig": "contig_13",
+      "position": 42000,
+      "confidence": 0.7588,
+      "evidence": {
+        "proper_pair_drop": 0.0422,
+        "insert_size_zscore": 0.0105,
+        "discordant_rate": 0.3035
+      }
+    },
+    {
+      "contig": "contig_8",
+      "position": 36000,
+      "confidence": 0.7243,
+      "evidence": {
+        "proper_pair_drop": 0.2088,
+        "insert_size_zscore": 0.9262,
+        "discordant_rate": 0.2897
+      }
+    },
+    {
+      "contig": "contig_8",
+      "position": 61500,
+      "confidence": 0.8025,
+      "evidence": {
+        "proper_pair_drop": 0.046,
+        "insert_size_zscore": 1.0369,
+        "discordant_rate": 0.321
+      }
+    },
+    {
+      "contig": "contig_20",
+      "position": 55000,
+      "confidence": 0.8386,
+      "evidence": {
+        "proper_pair_drop": 0.326,
+        "insert_size_zscore": 1.4732,
+        "discordant_rate": 0.3301
+      }
+    }
+  ]
+}
