@@ -152,9 +152,13 @@ def validate_output_path(path: Union[str, Path],
     """Validate an output file path."""
     path = Path(path)
     
-    # Check file extension
+    # Check file extension - handle case where extension might be missing
     if path.suffix.lower() not in ALLOWED_OUTPUT_EXTENSIONS:
-        raise FileTypeError(f"Invalid output file extension: {path.suffix}")
+        # If no extension, add .json as default
+        if not path.suffix:
+            path = path.with_suffix('.json')
+        else:
+            raise FileTypeError(f"Invalid output file extension: {path.suffix}")
     
     return validate_path(
         path,
